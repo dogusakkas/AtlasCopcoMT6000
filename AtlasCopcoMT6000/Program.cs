@@ -267,7 +267,7 @@ namespace AtlasCopcoMT6000
                 Console.WriteLine("\nMID0018 Gönderiliyor...");
 
                 string parameterSetIDStr = parameterSetID.ToString("D3");
-                string MID0018 = $"002300180010        {parameterSetIDStr} ";
+                string MID0018 = $"00230018 0010   00  {parameterSetIDStr}\0";
 
                 byte[] outstream = Encoding.ASCII.GetBytes(MID0018);
                 stream.Write(outstream, 0, outstream.Length);
