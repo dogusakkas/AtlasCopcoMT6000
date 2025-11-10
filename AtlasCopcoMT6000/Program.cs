@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net.Sockets;
 using System.Text;
@@ -14,40 +15,43 @@ namespace AtlasCopcoMT6000
         private NetworkStream stream;
 
 
-        static async Task Main(string[] args)
+        static void Main(string[] args)
         {
-            string ipAddress = "10.145.204.55"; // Cihazın IP adresi
+            //string ipAddress = "10.145.185.110"; // Cihazın IP adresi
+            string ipAddress = "10.145.204.57"; // Cihazın IP adresi
             int port = 4545; // Cihazın port numarası
 
             try
             {
                 TcpClient client = new TcpClient(ipAddress, port);
                 NetworkStream stream = client.GetStream();
-                int parameterSetID = 7;
+                int parameterSetID = 1;
 
                 Console.WriteLine("Bağlantı kuruldu, veri dinleniyor...");
 
                 // MID01 komutunu göndererek bağlantıyı başlat
                 MID01(stream, client);
 
-
                 //// PSET SEÇİMİ YAPILMAK İSTENMİYOR İSE MID10 VE MID18 KAPATILABİLİR
                 ///
 
+                // 8 Dijital Input'u dinleme (0210)
+                //MID0210(stream, client);
+
+                // Tek bir dijital input fonksiyonunu dinleme (0220)  // BURADA KENDİ INPUT KODUMUZU YOLLAMAMIZ GEREKEBİLİR - RELEASE TOOL İÇİN
+                //MID0220(stream, client);
+
+                // Röle fonksiyonlarını dinleme (0217)
+                MID0217(stream, client);
+
                 // MID0010 Get Pset List
-                MID0010(stream, client);
+                //MID0010(stream, client);
 
                 // MID0018 ile pset ayarı yap
                 //MID0018(stream, client,  parameterSetID);
 
-
-                
-                
-
                 // MID08 ile veri almaya başla
-                MID08(stream, client);
-
-
+                //MID08(stream, client);
 
                 Console.ReadLine();
             }
@@ -56,6 +60,151 @@ namespace AtlasCopcoMT6000
                 Console.WriteLine("Hata: " + ex.Message);
             }
         }
+
+
+        #region MID0210 - Subscribe to externally monitored inputs
+        static void MID0210(NetworkStream stream, TcpClient client)
+        {
+            Console.WriteLine("\nMID0210 (Subscribe external inputs) Gönderiliyor...");
+            string msg = "002900080010        021100100\0"; // 0020 = 20 byte uzunluk, MID=0211 // MID 211 KODU
+            //string msg = "00200210            \0"; // 0020 = 20 byte uzunluk, MID=0210
+            SendAndReceive(stream, client, msg);
+        }
+        #endregion
+
+        #region MID0211 - Status externally monitored inputs (Response)
+        static void MID0211Handler(string data)
+        {
+            // Gelen 8 inputun durumunu çözümleme
+            Console.WriteLine("\n-> MID0211 Dijital Input Durumları:");
+            for (int i = 21; i <= 28; i++)
+            {
+                int inputNo = i - 20;
+                char status = data.Length > i ? data[i] : '?';
+                Console.WriteLine($"DIG/IN {inputNo}: {(status == '1' ? "ON" : "OFF")}");
+            }
+        }
+        #endregion
+
+        #region MID0217 - Relay function upload
+        static void MID0217(NetworkStream stream, TcpClient client)
+        {
+            Console.WriteLine("\nMID0217 (Relay function) Gönderiliyor...");
+
+            // 3 farklı relay fonksiyonu için MID mesajları
+            var messages = new[]
+            {
+        "003200080010        021700103030\0", // EXTERNAL MONITORED 1
+        "003200080010        021700103031\0", // EXTERNAL MONITORED 2
+        "003200080010        021700103032\0",  // EXTERNAL MONITORED 3
+        "003200080010        021700103033\0"  // EXTERNAL MONITORED 4
+    };
+
+            foreach (var msg in messages)
+            {
+                Console.WriteLine($"\n-> Gönderiliyor: {msg}");
+                SendAndReceive(stream, client, msg);
+                Task.Delay(200).Wait(); 
+            }
+        }
+
+        static void MID0217Handler(string data)
+        {
+            try
+            {
+                string status = "";
+                // Gelen data'nın uzunluğunu kontrol et
+                if (data.Length < 28)
+                {
+                    Console.WriteLine("⚠ MID0217 veri uzunluğu yetersiz, parse edilemiyor.");
+                    return;
+                }
+
+                if (data.Length > 30)
+                {
+                    status = data.Substring(52, 1);
+
+                }
+                else
+                {
+                    status = data.Substring(27, 1); // 2 DATA GELDİĞİ İÇİN GEÇİCİ OLARAK BUNU KAPATTIM 
+
+                }
+
+                string relayNumber = data.Substring(22, 3);
+
+                // data = "002400050010    00  0008\0002802170010    00  01030020\0"
+
+                Console.WriteLine($"-> Röle {relayNumber} durumu: {(status == "1" ? "AKTİF" : "PASİF")}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("MID0217 parse hatası: " + ex.Message);
+            }
+        }
+        #endregion
+
+
+        #region MID0217 - Relay function upload
+        //static void MID0217(NetworkStream stream, TcpClient client)
+        //{
+        //    Console.WriteLine("\nMID0217 (Relay function) Gönderiliyor...");
+        //    //string msg = "003200080010        021700103001\0"; // 0032 = 32 byte uzunluk, MID=0217
+        //    string msg = "003200080010        021700103030\0"; // 0032 = 32 byte uzunluk, MID=0217 // EXTERNAL MONITORED 1
+        //    string msg2 = "003200080010        021700103031\0"; // 0032 = 32 byte uzunluk, MID=0217 // EXTERNAL MONITORED 2
+        //    string msg3 = "003200080010        021700103032\0"; // 0032 = 32 byte uzunluk, MID=0217 // EXTERNAL MONITORED 3
+        //    SendAndReceive(stream, client, msg);
+        //}
+
+        //static void MID0217Handler(string data)
+        //{
+        //    string relayNumber = data.Substring(22, 3);
+        //    string status = data.Substring(27, 1);
+        //    Console.WriteLine($"-> Röle {relayNumber} durumu: {(status == "1" ? "AKTİF" : "PASİF")}");
+        //}
+        #endregion
+
+        #region MID0220 - Subscribe to single digital input function
+        static void MID0220(NetworkStream stream, TcpClient client)
+        {
+            Console.WriteLine($"\nMID0220 (Subscribe digital input 050) Gönderiliyor...");
+
+            //string inputNo = digitalInputNo.ToString("D3"); // Üç haneli ASCII
+            string msg = $"003200080010        022100103050\0"; // EXTERNAL MONITORED 1
+            //string msg = $"00230220            {inputNo}\0";
+            SendAndReceive(stream, client, msg);
+        }
+        #endregion
+
+        #region MID0221 - Digital input function upload
+        static void MID0221Handler(string data)
+        {
+            string inputNo = data.Substring(22, 3);
+            string status = data.Substring(27, 1);
+            Console.WriteLine($"-> Dijital Giriş {inputNo}: {(status == "1" ? "AKTİF" : "PASİF")}");
+        }
+        #endregion
+
+        #region Yardımcı: Gönder/Al
+        static async Task SendAndReceive(NetworkStream stream, TcpClient client, string message)
+        {
+            byte[] outStream = Encoding.ASCII.GetBytes(message);
+            stream.Write(outStream, 0, outStream.Length);
+            stream.Flush();
+
+            byte[] buffer = new byte[client.ReceiveBufferSize];
+            int bytesRead = stream.Read(buffer, 0, buffer.Length);
+            string data = Encoding.ASCII.GetString(buffer, 0, bytesRead);
+
+            Console.WriteLine("Alınan veri: " + data);
+
+            // MID'ye göre yönlendirme
+            if (data.Contains("0211")) MID0211Handler(data);
+            else if (data.Contains("0217")) MID0217Handler(data);
+            else if (data.Contains("0221")) MID0221Handler(data);
+        }
+        #endregion
+
 
         static void MID01(NetworkStream stream, TcpClient client)
         {
@@ -298,8 +447,6 @@ namespace AtlasCopcoMT6000
                 Console.WriteLine("Hata: " + ex.Message);
             }
         }
-
-
 
 
 
